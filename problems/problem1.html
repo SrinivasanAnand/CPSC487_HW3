@@ -20,7 +20,8 @@
 </head>
 <body>
 <script type="module">
-    import {ThreeEngine} from "../js/utils/utils_three.js";
+    import {get_default_lil_gui, ThreeEngine, refresh_displays} from "../js/utils/utils_three.js";
+    import {transpose, identity_matrix, mul_matrix_matrix, mul_matrix_scalar, add_matrix_matrix} from "../js/utils/utils_math.js";
 
     // todo: create a visualization that demonstrates your knowledge of displacement-based
     // todo: distance over SE(3).  Note that this will use your logarithm solution from PS_U3,
@@ -69,7 +70,230 @@
         return adjugate;
     }
 
+    let engine = ThreeEngine.new_default_3d();
 
+
+    let settings = {
+        theta1_1: 0,
+        theta2_1: 0,
+        theta3_1: 0,
+        tx1: 0,
+        ty1: 0,
+        tz1: 0,
+        theta1_2: 0,
+        theta2_2: 0,
+        theta3_2: 0,
+        tx2: 0,
+        ty2: 0,
+        tz2: 0,
+        dis: 0.0,
+    };
+
+    let actions = {
+        reset1: function() {
+            settings.theta1_1 = 0;
+            settings.theta2_1 = 0;
+            settings.theta3_1 = 0;
+            settings.tx1 = 0;
+            settings.ty1 = 0;
+            settings.tz1 = 0;
+            refresh_displays(gui);
+        },
+        reset2: function() {
+            settings.theta1_2 = 0;
+            settings.theta2_2 = 0;
+            settings.theta3_2 = 0;
+            settings.tx2 = 0;
+            settings.ty2 = 0;
+            settings.tz2 = 0;
+            refresh_displays(gui);
+        }
+    }
+
+    let gui = get_default_lil_gui();
+    gui.add(settings, 'theta1_1', -6.28, 6.28).name('Point1: Theta1');
+    gui.add(settings, 'theta2_1', -6.28, 6.28).name('Point1: Theta2');
+    gui.add(settings, 'theta3_1', -6.28, 6.28).name('Point1: Theta3');
+    gui.add(settings, 'tx1', -2.0, 2.0).name('tx1');
+    gui.add(settings, 'ty1', -2.0, 2.0).name('ty1');
+    gui.add(settings, 'tz1', -2.0, 2.0).name('tz1');
+    gui.add(actions, 'reset1').name('Reset1');
+
+    gui.add(settings, 'theta1_2', -6.28, 6.28).name('Point2: Theta1');
+    gui.add(settings, 'theta2_2', -6.28, 6.28).name('Point2: Theta2');
+    gui.add(settings, 'theta3_2', -6.28, 6.28).name('Point2: Theta3');
+    gui.add(settings, 'tx2', -2.0, 2.0).name('tx2');
+    gui.add(settings, 'ty2', -2.0, 2.0).name('ty2');
+    gui.add(settings, 'tz2', -2.0, 2.0).name('tz2');
+    gui.add(actions, 'reset2').name('Reset2');
+
+    gui.add(settings, 'dis').name('Disp Based Dis');
+
+    function get_se3(so3, t) {
+        let se3 = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 1]]
+        
+        for (let i = 0; i < 3; i++){
+            for (let j = 0; j < 3; j++){
+                se3[i][j] = so3[i][j];
+            }
+        }
+        se3[0][3] = t[0][0];
+        se3[1][3] = t[1][0];
+        se3[2][3] = t[2][0];
+        return se3;
+    }
+
+    function get_so3_and_t(se3) {
+        let so3 = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+        
+        for (let i = 0; i < 3; i++){
+            for (let j = 0; j < 3; j++){
+                so3[i][j] = se3[i][j];
+            }
+        }
+
+        let t = [[se3[0][3]], [se3[1][3]], [se3[2][3]]];
+
+        return [so3, t];
+    }
+
+    function get_little_so3_at_pi(SO3){
+        let pi_so3_matrix = [[0.0, -Math.PI*Math.sqrt(0.5 * (SO3_mat[2][2] + 1)), Math.PI*Math.sqrt(0.5 * (SO3_mat[1][1] + 1))],
+                    [Math.PI*Math.sqrt(0.5 * (SO3_mat[2][2] + 1)), 0.0, -Math.PI*Math.sqrt(0.5 * (SO3_mat[0][0] + 1))],
+                    [-Math.PI*Math.sqrt(0.5 * (SO3_mat[1][1] + 1))], Math.PI*Math.sqrt(0.5 * (SO3_mat[0][0] + 1)), 0.0];
+        return pi_so3_matrix;
+    }
+    function get_little_so3(SO3){
+        let tr = SO3[0][0] + SO3[1][1] + SO3[2][2];
+        let beta = Math.acos((tr - 1) / 2.0);
+
+        if (Math.abs(beta) < 0.0001) {
+            let r_minus_rT = add_matrix_matrix(SO3, mul_matrix_scalar(transpose(SO3), -1));
+            let beta_sum = 0.5 + Math.pow(beta, 2)/12.0 + Math.pow(beta, 4)*7/720.0;
+            return mul_matrix_scalar(r_minus_rT, beta_sum);
+        }
+        else if (beta == Math.PI) {
+            return get_little_so3_at_pi(SO3);
+        }
+        else {
+            let r_minus_rT = add_matrix_matrix(SO3, mul_matrix_scalar(transpose(SO3), -1));
+            let beta_func = beta / (2.0 * Math.sin(beta));
+            return mul_matrix_scalar(r_minus_rT, beta_func);
+        }
+    }
+
+    function get_alphas_from_little_so3(so3) {
+        let a1 = so3[2][1];
+        let a2 = so3[0][2];
+        let a3 = so3[1][0];
+        return [a1, a2, a3];
+    }
+
+    function get_little_t(so3, beta, t) {
+        let p = 0.0;
+        let q = 0.0;
+        if (Math.abs(beta) < 0.0001) {
+            p = (1/6.0) - (Math.pow(beta, 2)/120.0) + (Math.pow(beta, 4)/ 5040.0);
+            q = 0.5 - (Math.pow(beta, 2)/24.0) + (Math.pow(beta, 4)/720.0);
+        } else {
+            p = (beta - Math.sin(beta)) / Math.pow(beta, 3);
+            q = (1 - Math.cos(beta)) / Math.pow(beta, 2);
+        }
+
+        let I = identity_matrix(3);
+        let p_so3_squared = mul_matrix_scalar(mul_matrix_matrix(so3, so3), p);
+        let q_so3 = mul_matrix_scalar(so3, q);
+        let sum_matrix = add_matrix_matrix(add_matrix_matrix(I, p_so3_squared), q_so3);
+
+        let sum_matrix_inv = numeric.inv(sum_matrix);
+        let little_t = mul_matrix_matrix(sum_matrix_inv, t);
+
+        console.log(t);
+        return [little_t[0][0], little_t[1][0], little_t[2][0]];
+    }
+
+    function dis(so3_1, t1, so3_2, t2){
+
+        let se3_1 = get_se3(so3_1, t1);
+        let se3_2 = get_se3(so3_2, t2);
+
+        let disp = mul_matrix_matrix(numeric.inv(se3_1), se3_2);
+        let [disp_so3, disp_t] = get_so3_and_t(disp);
+
+        let little_so3 = get_little_so3(disp_so3);
+        
+        let [a1, a2, a3] = get_alphas_from_little_so3(little_so3);
+        let beta = Math.sqrt(Math.pow(a1, 2) + Math.pow(a2, 2) + Math.pow(a3, 2));
+
+        let [a4, a5, a6] = get_little_t(little_so3, beta, disp_t);
+        let dis = Math.sqrt(a1*a1 + a2*a2 + a3*a3 + a4*a4 + a5*a5 + a6*a6);
+        return dis;
+    }
+
+
+    function get_x_matrix(theta) {
+        return [[1, 0, 0], [0, Math.cos(theta), -Math.sin(theta)], [0, Math.sin(theta), Math.cos(theta)]];
+    }
+
+    function get_y_matrix(theta) {
+        return [[Math.cos(theta), 0, Math.sin(theta)], [0, 1, 0], [-Math.sin(theta), 0, Math.cos(theta)]];
+    }
+
+    function get_z_matrix(theta) {
+        return [[Math.cos(theta), -Math.sin(theta), 0], [Math.sin(theta), Math.cos(theta), 0], [0,0,1]];
+    }
+
+    function get_x_column(so3_matrix){
+        return [[so3_matrix[0][0]], [so3_matrix[1][0]], [so3_matrix[2][0]]];
+    }
+
+    function get_y_column(so3_matrix){
+        return [[so3_matrix[0][1]], [so3_matrix[1][1]], [so3_matrix[2][1]]];
+    }
+
+    function get_z_column(so3_matrix){
+        return [[so3_matrix[0][2]], [so3_matrix[1][2]], [so3_matrix[2][2]]];
+    }
+
+    engine.animation_loop(function() {
+
+        let so3_x_1 = get_x_matrix(settings.theta1_1);
+        let so3_y_1 = get_y_matrix(settings.theta2_1);
+        let so3_z_1 = get_z_matrix(settings.theta3_1);
+
+        let so3_x_2 = get_x_matrix(settings.theta1_2);
+        let so3_y_2 = get_y_matrix(settings.theta2_2);
+        let so3_z_2 = get_z_matrix(settings.theta3_2);
+
+        let SO3_1 = mul_matrix_matrix(mul_matrix_matrix(so3_x_1, so3_y_1), so3_z_1);
+        let SO3_2 = mul_matrix_matrix(mul_matrix_matrix(so3_x_2, so3_y_2), so3_z_2);
+
+        let center1 = [settings.tx1, settings.ty1, settings.tz1];
+        let center2 = [settings.tx2, settings.ty2, settings.tz2];
+
+        let local_x_axis_1 = add_matrix_matrix(get_x_column(SO3_1), center1);
+        let local_y_axis_1 = add_matrix_matrix(get_y_column(SO3_1), center1);
+        let local_z_axis_1 = add_matrix_matrix(get_z_column(SO3_1), center1);
+
+        let local_x_axis_2 = add_matrix_matrix(get_x_column(SO3_2), center2);
+        let local_y_axis_2 = add_matrix_matrix(get_y_column(SO3_2), center2);
+        let local_z_axis_2 = add_matrix_matrix(get_z_column(SO3_2), center2);
+
+        engine.draw_debug_vector(center1, local_x_axis_1, 0.03, undefined, 0xff0000);
+        engine.draw_debug_vector(center1, local_y_axis_1, 0.03, undefined, 0x00ff00);
+        engine.draw_debug_vector(center1, local_z_axis_1, 0.03, undefined, 0x0000ff);
+
+        engine.draw_debug_vector(center2, local_x_axis_2, 0.03, undefined, 0xff00dd);
+        engine.draw_debug_vector(center2, local_y_axis_2, 0.03, undefined, 0xddff00);
+        engine.draw_debug_vector(center2, local_z_axis_2, 0.03, undefined, 0x00ddff);
+
+        let t1 = [[settings.tx1], [settings.ty1], [settings.tz1]]
+        let t2 = [[settings.tx2], [settings.ty2], [settings.tz2]]
+        
+        settings.dis = dis(SO3_1, t1, SO3_2, t2);
+
+        refresh_displays(gui);
+    });
 
 </script>
 </body>
