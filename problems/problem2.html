@@ -22,9 +22,116 @@
 <script type="module">
     import {get_default_lil_gui, ThreeEngine, refresh_displays} from "../js/utils/utils_three.js";
 
+    import {transpose, identity_matrix, mul_matrix_matrix, mul_matrix_scalar, add_matrix_matrix} from "../js/utils/utils_math.js";
+
     // todo: create a visualization that demonstrates your knowledge of quaternions.  This is intentionally
     // todo: open-ended.  Be as creative as you want, or feel free to recreate any of the visualizations
     // todo: found in Section 3.3.
+
+    let engine = ThreeEngine.new_default_3d();
+
+    let settings = {
+        display_mesh: true,
+        display_quaternions: true,
+        theta1: 0,
+        theta2: 0,
+        theta3: 0,
+        w: 0,
+        x: 0,
+        y: 0,
+        z: 0,
+    };
+
+    let actions = {
+        reset: function() {
+            settings.theta1 = 0;
+            settings.theta2 = 0;
+            settings.theta3 = 0;
+            refresh_displays(gui);
+        },
+    }
+
+    let gui = get_default_lil_gui();
+
+    gui.add(settings, 'display_quaternions').name('Display Quaternions');
+    gui.add(settings, 'display_mesh').name('Display Mesh');
+
+    gui.add(settings, 'theta1', -3.14, 3.14).name('Theta1');
+    gui.add(settings, 'theta2', -3.14, 3.14).name('Theta2');
+    gui.add(settings, 'theta3', -3.14, 3.14).name('Theta3');
+
+    gui.add(settings, 'w').name('w').disable();
+    gui.add(settings, 'x').name('x').disable();
+    gui.add(settings, 'y').name('y').disable();
+    gui.add(settings, 'z').name('z').disable();
+
+    gui.add(actions, 'reset');
+
+    let index = engine.add_suzanne_monkey_as_mesh_object(0x00ffdd);
+    let points = engine.get_local_vertex_positions_of_mesh_object(index);
+
+    function draw_quaternion(q){
+        let quaternion_point = [q[1], q[2], q[3]]
+        engine.draw_debug_vector([0, 0, 0], quaternion_point, 0.02, undefined, 0xfe00dd, 0.35);
+        engine.draw_debug_line([q[1], q[2], q[3]-0.5], [q[1], q[2], q[3]+0.5], false, 0.01, 0x000022, 0.55);
+        engine.draw_debug_sphere([q[1], q[2], q[3]+q[0]], 0.02, 0xeeffdd, 0.45, 10);
+    }
+    function quaternion_product(q1, q2){
+        let q_product = [0.0, 0.0, 0.0, 0.0];
+        q_product[0] = q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3];
+        q_product[1] = q1[0]*q2[1] + q1[1]*q2[0] + q1[2]*q2[3] - q1[3]*q2[2];
+        q_product[2] = q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1];
+        q_product[3] = q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0];
+        return q_product;
+    }
+
+    let last_display_value = true;
+    engine.animation_loop(function() {
+
+        let rotated_points = [];
+        let rotated_quaternions = [];
+
+        let x_quateronion = [Math.cos(settings.theta1), Math.sin(settings.theta1), 0.0, 0.0];
+        let y_quateronion = [Math.cos(settings.theta2), 0.0, Math.sin(settings.theta2), 0.0];
+        let z_quateronion = [Math.cos(settings.theta3), 0.0, 0.0, Math.sin(settings.theta3)];
+
+        let r_quaternion = quaternion_product(quaternion_product(x_quateronion, y_quateronion), z_quateronion);
+
+        points.forEach(point => {
+            let point_as_quaternion = [0, point[0], point[1], point[2]];
+
+            // Since we are working with length 1 quaternions, we can just use conjugate (as inverse)
+            let conjugate = [r_quaternion[0], -r_quaternion[1], -r_quaternion[2], -r_quaternion[3]];
+            
+            let rotated_point_as_quaternion = quaternion_product(quaternion_product(r_quaternion, point_as_quaternion), conjugate);
+            rotated_quaternions.push(rotated_point_as_quaternion);
+
+            let rotated_point = [[rotated_point_as_quaternion[1]],[rotated_point_as_quaternion[2]], [rotated_point_as_quaternion[3]]];
+            rotated_points.push(rotated_point);
+
+        });
+
+        engine.update_vertex_positions_of_mesh_object(index, rotated_points);
+
+        if (settings.display_quaternions){
+            rotated_quaternions.forEach(quaternion => {
+                draw_quaternion(quaternion);
+            })
+        }
+
+        settings.w = r_quaternion[0];
+        settings.x = r_quaternion[1];
+        settings.y = r_quaternion[2];
+        settings.z = r_quaternion[3];
+
+        refresh_displays(gui);
+
+        
+        if (last_display_value != settings.display_mesh){
+            engine.toggle_mesh_object_visibility(index);
+        }
+        last_display_value = settings.display_mesh;
+    });
 
 </script>
 </body>
